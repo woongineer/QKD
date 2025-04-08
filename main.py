@@ -19,6 +19,6 @@ if __name__ == "__main__":
     rl_opt = ReinforcementLearningOptimizer(initial_kernel=kernel, X=x_train, y=y_train,
                                             ke=evaluator, env_mode="wide", bw_possible=5)
 
-    optimized_kernel = rl_opt.optimize(initial_episodes=2, n_episodes=7, n_steps_per_fit=1, final_episodes=2)
+    optimized_kernel = rl_opt.optimize(initial_episodes=5, n_episodes=100, n_steps_per_fit=1, final_episodes=10)
 
     print(f"Optimized kernel:{optimized_kernel}")

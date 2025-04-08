@@ -85,7 +85,7 @@ class RLKernelEnvironment(Environment):
         n_op += 1
         self._state = self._serialize_state(n_op, kernel)
 
-        reward = -1 * self.ke.evaluate(kernel, None, self.X, self.y)
+        reward = -10.0 * self.ke.evaluate(kernel, None, self.X, self.y)
         self.last_reward = reward
         absorbing = (n_op == self.n_operations)
         return self._state, reward, absorbing, {}

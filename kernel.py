@@ -2,6 +2,7 @@ import numpy as np
 import itertools
 import pennylane as qml
 from enum import Enum
+import torch
 
 
 class Operation:
@@ -221,26 +222,69 @@ class PennylaneKernel:
         return f"{self.ansatz} -> {self.measurement}"
 
 
+# class FidelityLossEvaluator:
+#     def __init__(self, batch_size=50):
+#         self.batch_size = batch_size
+#
+#     def evaluate(self, kernel: PennylaneKernel, K, X, y):
+#         from qiskit import Aer, transpile
+#         from qiskit.quantum_info import Statevector
+#
+#         fidelities = []
+#         sim = Aer.get_backend('aer_simulator')
+#
+#         for _ in range(self.batch_size):
+#             i, j = np.random.randint(0, len(X), size=2)
+#             qc1 = kernel.to_qiskit_circuit(X[i])
+#             qc2 = kernel.to_qiskit_circuit(X[j])
+#             qc1 = transpile(qc1, sim)
+#             qc2 = transpile(qc2, sim)
+#             sv1 = Statevector(qc1)
+#             sv2 = Statevector(qc2)
+#             f = np.abs(np.vdot(sv1.data, sv2.data))**2
+#             fidelities.append(f)
+#
+#         return 1 - np.mean(fidelities)
+
+
 class FidelityLossEvaluator:
     def __init__(self, batch_size=50):
         self.batch_size = batch_size
 
-    def evaluate(self, kernel: PennylaneKernel, K, X, y):
-        from qiskit import Aer, transpile
-        from qiskit.quantum_info import Statevector
+    def evaluate(self, kernel, K, X, y):
+        """
+        Reward = - MSE loss between predicted fidelity and similarity label (1/0)
+        """
+        # Define new data sampler (similar to your new_data)
+        def sample_similarity_pairs(X, Y, batch_size):
+            X1, X2, Y_label = [], [], []
+            for _ in range(batch_size):
+                i, j = np.random.randint(len(X)), np.random.randint(len(X))
+                X1.append(X[i])
+                X2.append(X[j])
+                Y_label.append(1.0 if Y[i] == Y[j] else 0.0)
+            return np.array(X1), np.array(X2), np.array(Y_label)
+
+        # Sample similarity batch
+        X1_batch, X2_batch, Y_batch = sample_similarity_pairs(X, y, self.batch_size)
+
+        dev = qml.device('default.qubit', wires=kernel.ansatz.n_qubits)
+
+        @qml.qnode(dev)
+        def fidelity_qnode(x1, x2):
+            kernel._apply_ansatz(x1, list(range(kernel.ansatz.n_qubits)))
+            qml.adjoint(kernel._apply_ansatz)(x2, list(range(kernel.ansatz.n_qubits)))
+            return qml.probs(wires=range(kernel.ansatz.n_qubits))
 
         fidelities = []
-        sim = Aer.get_backend('aer_simulator')
+        for i in range(self.batch_size):
+            probs = fidelity_qnode(X1_batch[i], X2_batch[i])
+            fidelities.append(float(probs[0]))  # Fidelity = P(0...0)
 
-        for _ in range(self.batch_size):
-            i, j = np.random.randint(0, len(X), size=2)
-            qc1 = kernel.to_qiskit_circuit(X[i])
-            qc2 = kernel.to_qiskit_circuit(X[j])
-            qc1 = transpile(qc1, sim)
-            qc2 = transpile(qc2, sim)
-            sv1 = Statevector(qc1)
-            sv2 = Statevector(qc2)
-            f = np.abs(np.vdot(sv1.data, sv2.data))**2
-            fidelities.append(f)
+        fidelities = torch.tensor(fidelities)
+        labels = torch.tensor(Y_batch)
 
-        return 1 - np.mean(fidelities)
+        # MSE loss = similarity loss
+        loss = torch.nn.functional.mse_loss(fidelities, labels)
+
+        return loss.item()  # RL에서는 reward = - loss 로 사용됨
